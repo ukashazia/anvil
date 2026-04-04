@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"strconv"
@@ -48,16 +50,23 @@ func NewClient(id string, opts ...Option) *Client {
 	}
 }
 
-func (c *Client) Sign(req *http.Request, clientId string) *http.Request {
+func (c *Client) Sign(req *http.Request) *http.Request {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil
 	}
 
+	err = req.Body.Close()
+	if err != nil {
+		return nil
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(body))
+
 	nonce := anvil.GetNonce()
 	time := strconv.Itoa(int(time.Now().UnixMilli()))
 
-	sig, err := sign(c.cfg.signer, []byte(nonce), []byte(time), []byte(clientId), body)
+	sig, err := sign(c.cfg.signer, []byte(nonce), []byte(time), []byte(c.id), body)
 	if err != nil {
 		return nil
 	}
@@ -65,20 +74,19 @@ func (c *Client) Sign(req *http.Request, clientId string) *http.Request {
 	req.Header.Set(headerNonce, nonce)
 	req.Header.Set(headerReqTime, time)
 	req.Header.Set(headerClientId, c.id)
-	req.Header.Set(headerReqSig, string(sig))
+	req.Header.Set(headerReqSig, hex.EncodeToString(sig))
 
 	return req
 }
 
 func sign(signer anvil.Signer, nonce []byte, t []byte, clientId []byte, body []byte) ([]byte, error) {
 	canonical := append(nonce, t...)
-	canonical = append(canonical, t...)
 	canonical = append(canonical, clientId...)
 	canonical = append(canonical, body...)
 
 	s, err := signer.Sign(canonical)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	return s, nil

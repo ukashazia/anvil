@@ -82,7 +82,7 @@ type EcdsaSigner struct {
 
 type PrivateKey *ecdsa.PrivateKey
 
-func LoadEcdsaPrivatekey(key []byte) (PrivateKey, error) {
+func LoadEcdsaPrivateKey(key []byte) (PrivateKey, error) {
 	priv, err := x509.ParsePKCS8PrivateKey(key)
 	if err != nil {
 		return nil, err

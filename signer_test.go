@@ -190,7 +190,7 @@ func TestGenerateEcdsaPrivateKey_Uniqueness(t *testing.T) {
 	}
 }
 
-func TestLoadEcdsaPrivatekey(t *testing.T) {
+func TestLoadEcdsaPrivateKey(t *testing.T) {
 	key, err := anvil.GenerateEcdsaPrivateKey()
 	if err != nil {
 		t.Fatalf("GenerateEcdsaPrivateKey() error = %v", err)
@@ -201,13 +201,13 @@ func TestLoadEcdsaPrivatekey(t *testing.T) {
 		t.Fatalf("MarshalPKCS8PrivateKey() error = %v", err)
 	}
 
-	loaded, err := anvil.LoadEcdsaPrivatekey(keyBytes)
+	loaded, err := anvil.LoadEcdsaPrivateKey(keyBytes)
 	if err != nil {
-		t.Fatalf("LoadEcdsaPrivatekey() error = %v", err)
+		t.Fatalf("LoadEcdsaPrivateKey() error = %v", err)
 	}
 
 	if loaded == nil {
-		t.Fatal("LoadEcdsaPrivatekey() returned nil")
+		t.Fatal("LoadEcdsaPrivateKey() returned nil")
 	}
 
 	loadedBytes, err := x509.MarshalPKCS8PrivateKey((*ecdsa.PrivateKey)(loaded))
@@ -216,16 +216,16 @@ func TestLoadEcdsaPrivatekey(t *testing.T) {
 	}
 
 	if !bytes.Equal(loadedBytes, keyBytes) {
-		t.Error("LoadEcdsaPrivatekey() loaded different key")
+		t.Error("LoadEcdsaPrivateKey() loaded different key")
 	}
 }
 
-func TestLoadEcdsaPrivatekey_Invalid(t *testing.T) {
+func TestLoadEcdsaPrivateKey_Invalid(t *testing.T) {
 	invalid := []byte("invalid key data")
 
-	_, err := anvil.LoadEcdsaPrivatekey(invalid)
+	_, err := anvil.LoadEcdsaPrivateKey(invalid)
 	if err == nil {
-		t.Fatal("LoadEcdsaPrivatekey() expected error for invalid data")
+		t.Fatal("LoadEcdsaPrivateKey() expected error for invalid data")
 	}
 }
 

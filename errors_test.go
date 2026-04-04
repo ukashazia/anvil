@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ukashazia/anvil/pkg/anvil"
+	"github.com/ukashazia/anvil"
 )
 
 func TestNoPublicKeyError(t *testing.T) {

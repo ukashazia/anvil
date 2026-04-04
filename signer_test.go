@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"testing"
 
-	"github.com/ukashazia/anvil/pkg/anvil"
+	"github.com/ukashazia/anvil"
 )
 
 func TestAlgorithm_String(t *testing.T) {

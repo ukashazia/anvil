@@ -10,7 +10,7 @@ import (
 
 type Verifier interface {
 	Verify(msg []byte, sig []byte) (bool, error)
-	Algorithm()
+	Algorithm() Algorithm
 }
 
 // concrete implementation
@@ -18,6 +18,12 @@ type Verifier interface {
 // hmac verification
 type HmacVerifier struct {
 	secret hmacSecret
+}
+
+func NewHmacVerifier(secret hmacSecret) *HmacVerifier {
+	return &HmacVerifier{
+		secret: secret,
+	}
 }
 
 func (v *HmacVerifier) Verify(msg []byte, sig []byte) (bool, error) {

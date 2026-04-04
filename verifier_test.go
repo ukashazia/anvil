@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"github.com/ukashazia/anvil/pkg/anvil"
+	"github.com/ukashazia/anvil"
 )
 
 func TestLoadEcdsaPublicKey(t *testing.T) {

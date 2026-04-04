@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ukashazia/anvil/pkg/anvil"
+	"github.com/ukashazia/anvil"
 )
 
 func TestGetNonce(t *testing.T) {

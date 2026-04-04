@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ukashazia/anvil/pkg/anvil"
+	"github.com/ukashazia/anvil"
 )
 
 func TestNewKeyStore(t *testing.T) {

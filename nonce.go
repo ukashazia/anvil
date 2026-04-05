@@ -8,13 +8,55 @@ import (
 )
 
 type NonceStorer interface {
-	Set(clientId string, nonce string) error
-	Valid(clientId string, nonce string) (bool, error)
+	Mark(nonce string) error
+	Prune() error
 }
 
 type NonceStore struct {
-	duration time.Duration
-	data     sync.Map
+	ttl  time.Duration
+	data sync.Map
+}
+
+type nonceValue struct{}
+
+type nonceKey struct {
+	key   string
+	setAt time.Time
+}
+
+func NewNonceStore(ttl time.Duration) *NonceStore {
+	return &NonceStore{
+		ttl:  ttl,
+		data: sync.Map{},
+	}
+}
+
+func (s *NonceStore) Mark(n string) error {
+	key := nonceKey{
+		key:   n,
+		setAt: time.Now(),
+	}
+
+	_, exists := s.data.Load(key)
+	if !exists {
+		s.data.Store(key, nonceValue{})
+		return nil
+	}
+
+	return NonceExists
+}
+
+func (s *NonceStore) Prune() error {
+	s.data.Range(func(key, value any) bool {
+		nonce := key.(nonceKey)
+		if time.Since(nonce.setAt) > s.ttl {
+			s.data.Delete(nonce)
+		}
+
+		return true
+	})
+
+	return nil
 }
 
 func GetNonce() string {
@@ -25,64 +67,4 @@ func GetNonce() string {
 	}
 
 	return hex.EncodeToString(r)
-}
-
-func NewNonceStore(d time.Duration) *NonceStore {
-	return &NonceStore{
-		duration: d,
-		data:     sync.Map{},
-	}
-}
-
-type nonceValue struct {
-	time    time.Time
-	expired bool
-}
-
-type nonceKey struct {
-	key    string
-	client string
-}
-
-func (s *NonceStore) Set(c string, n string) error {
-	key := nonceKey{
-		key:    n,
-		client: c,
-	}
-
-	_, exists := s.data.Load(key)
-	if !exists {
-		s.data.Store(key, nonceValue{time.Now(), false})
-		return nil
-	}
-
-	return DuplicateNonce
-}
-
-func (s *NonceStore) Valid(c string, n string) (bool, error) {
-
-	key := nonceKey{
-		key:    n,
-		client: c,
-	}
-
-	v, exists := s.data.Load(key)
-	if !exists {
-		return false, NoNonceError
-	}
-
-	value := v.(nonceValue)
-
-	if value.expired {
-		return false, nil
-	}
-
-	value.expired = true
-	s.data.Store(key, value)
-
-	if time.Since(value.time) > s.duration {
-		return false, nil
-	}
-
-	return true, nil
 }

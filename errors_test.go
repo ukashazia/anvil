@@ -37,6 +37,21 @@ func TestNoNonceError(t *testing.T) {
 	}
 }
 
+func TestNonceExists(t *testing.T) {
+	if anvil.NonceExists == nil {
+		t.Fatal("NonceExists should not be nil")
+	}
+
+	expected := "nonce already exists"
+	if anvil.NonceExists.Error() != expected {
+		t.Errorf("NonceExists message = %q, want %q", anvil.NonceExists.Error(), expected)
+	}
+
+	if !errors.Is(anvil.NonceExists, anvil.NonceExists) {
+		t.Error("errors.Is should match NonceExists")
+	}
+}
+
 func TestErrorsAreDistinct(t *testing.T) {
 	if errors.Is(anvil.NoPublicKeyError, anvil.NoNonceError) {
 		t.Error("NoPublicKeyError and NoNonceError should be distinct")
@@ -44,5 +59,13 @@ func TestErrorsAreDistinct(t *testing.T) {
 
 	if errors.Is(anvil.NoNonceError, anvil.NoPublicKeyError) {
 		t.Error("NoNonceError and NoPublicKeyError should be distinct")
+	}
+
+	if errors.Is(anvil.NonceExists, anvil.NoPublicKeyError) {
+		t.Error("NonceExists and NoPublicKeyError should be distinct")
+	}
+
+	if errors.Is(anvil.NonceExists, anvil.NoNonceError) {
+		t.Error("NonceExists and NoNonceError should be distinct")
 	}
 }

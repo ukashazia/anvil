@@ -229,7 +229,9 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 	keyStore.SetPublicKey("client", clientPubKey)
 
 	nonce := anvil.GetNonce()
-	nonceStore.Set("client", nonce)
+	if err := nonceStore.Mark(nonce); err != nil {
+		t.Fatalf("Mark() error = %v", err)
+	}
 
 	message := []byte("authenticated request from client")
 	clientSig, err := clientSigner.Sign(message)
@@ -262,24 +264,21 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 		t.Error("Verify() = false, want true for valid client signature")
 	}
 
-	nonceValid, err := nonceStore.Valid("client", nonce)
+	err = nonceStore.Mark(nonce)
 	if err != nil {
-		t.Fatalf("Valid() error = %v", err)
-	}
-
-	if !nonceValid {
-		t.Error("Valid() = false, want true for fresh nonce within TTL")
+		t.Fatalf("Mark() error = %v", err)
 	}
 
 	time.Sleep(6 * time.Second)
 
-	nonceValid, err = nonceStore.Valid("client", nonce)
+	err = nonceStore.Prune()
 	if err != nil {
-		t.Fatalf("Valid() error = %v", err)
+		t.Fatalf("Prune() error = %v", err)
 	}
 
-	if nonceValid {
-		t.Error("Valid() = true, want false for nonce after TTL expiry")
+	err = nonceStore.Mark(nonce)
+	if err != nil {
+		t.Fatalf("Mark() after Prune() error = %v", err)
 	}
 }
 

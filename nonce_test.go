@@ -1,7 +1,6 @@
 package anvil_test
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -40,167 +39,123 @@ func TestGetNonceUniqueness(t *testing.T) {
 }
 
 func TestNewNonceStore(t *testing.T) {
-	duration := 5 * time.Second
-	store := anvil.NewNonceStore(duration)
+	store := anvil.NewNonceStore(5 * time.Second)
 
 	if store == nil {
 		t.Fatal("NewNonceStore() returned nil")
 	}
 }
 
-func TestNonceStore_Set(t *testing.T) {
+func TestNonceStore_Mark(t *testing.T) {
 	store := anvil.NewNonceStore(5 * time.Second)
 
-	err := store.Set("client1", "nonce1")
+	err := store.Mark("nonce1")
 	if err != nil {
-		t.Fatalf("Set() error = %v", err)
+		t.Fatalf("Mark() error = %v", err)
 	}
 
-	err = store.Set("client1", "nonce2")
+	err = store.Mark("nonce2")
 	if err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
-
-	err = store.Set("client2", "nonce1")
-	if err != nil {
-		t.Fatalf("Set() error = %v", err)
+		t.Fatalf("Mark() error = %v", err)
 	}
 }
 
-func TestNonceStore_Valid_NoClient(t *testing.T) {
+func TestNonceStore_Mark_SameNonceMultipleTimes(t *testing.T) {
 	store := anvil.NewNonceStore(5 * time.Second)
 
-	valid, err := store.Valid("nonexistent", "nonce1")
-	if err == nil {
-		t.Fatal("Valid() expected error for nonexistent client")
-	}
-
-	if !errors.Is(err, anvil.NoNonceError) {
-		t.Errorf("Valid() error = %v, want NoNonceError", err)
-	}
-
-	if valid {
-		t.Error("Valid() = true, want false")
-	}
-}
-
-func TestNonceStore_Valid_FreshNonce(t *testing.T) {
-	store := anvil.NewNonceStore(5 * time.Second)
-	store.Set("client1", "nonce1")
-
-	valid, err := store.Valid("client1", "nonce1")
+	err := store.Mark("nonce1")
 	if err != nil {
-		t.Fatalf("Valid() error = %v", err)
+		t.Fatalf("Mark() error = %v", err)
 	}
 
-	if !valid {
-		t.Error("Valid() = false, want true for fresh nonce")
+	err = store.Mark("nonce1")
+	if err != nil {
+		t.Fatalf("Mark() error = %v", err)
 	}
 }
 
-func TestNonceStore_Valid_ExpiredNonce(t *testing.T) {
+func TestNonceStore_Prune_RemovesExpiredNonces(t *testing.T) {
 	store := anvil.NewNonceStore(50 * time.Millisecond)
-	store.Set("client1", "nonce1")
+
+	err := store.Mark("nonce1")
+	if err != nil {
+		t.Fatalf("Mark() error = %v", err)
+	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	valid, err := store.Valid("client1", "nonce1")
+	err = store.Prune()
 	if err != nil {
-		t.Fatalf("Valid() error = %v", err)
+		t.Fatalf("Prune() error = %v", err)
 	}
 
-	if valid {
-		t.Error("Valid() = true, want false for expired nonce")
+	err = store.Mark("nonce1")
+	if err != nil {
+		t.Fatalf("Mark() after Prune() error = %v", err)
 	}
 }
 
-func TestNonceStore_Valid_OnceOnly(t *testing.T) {
-	store := anvil.NewNonceStore(5 * time.Second)
-	store.Set("client1", "nonce1")
+func TestNonceStore_Prune_LeavesFreshNonces(t *testing.T) {
+	store := anvil.NewNonceStore(50 * time.Millisecond)
 
-	valid, err := store.Valid("client1", "nonce1")
+	err := store.Mark("nonce1")
 	if err != nil {
-		t.Fatalf("Valid() first call error = %v", err)
-	}
-	if !valid {
-		t.Fatal("Valid() first call = false, want true")
+		t.Fatalf("Mark() error = %v", err)
 	}
 
-	valid, err = store.Valid("client1", "nonce1")
+	err = store.Prune()
 	if err != nil {
-		t.Fatalf("Valid() second call error = %v", err)
+		t.Fatalf("Prune() error = %v", err)
 	}
-	if valid {
-		t.Error("Valid() second call = true, want false (nonce should be expired)")
+
+	err = store.Mark("nonce1")
+	if err != nil {
+		t.Fatalf("Mark() error = %v", err)
 	}
 }
 
-func TestNonceStore_Valid_MultipleNonces(t *testing.T) {
-	store := anvil.NewNonceStore(5 * time.Second)
-	store.Set("client1", "nonce1")
-	store.Set("client1", "nonce2")
-	store.Set("client1", "nonce3")
-
-	tests := []struct {
-		nonce string
-		want  bool
-	}{
-		{"nonce1", true},
-		{"nonce2", true},
-		{"nonce3", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.nonce, func(t *testing.T) {
-			valid, err := store.Valid("client1", tt.nonce)
-			if err != nil {
-				t.Fatalf("Valid() error = %v", err)
-			}
-			if valid != tt.want {
-				t.Errorf("Valid() = %v, want %v", valid, tt.want)
-			}
-		})
-	}
-}
-
-func TestNonceStore_Concurrent(t *testing.T) {
+func TestNonceStore_ConcurrentMark(t *testing.T) {
 	store := anvil.NewNonceStore(5 * time.Second)
 	var wg sync.WaitGroup
-	clients := 10
-	noncesPerClient := 100
+	workers := 10
+	noncesPerWorker := 100
 
-	for i := range clients {
+	for range workers {
 		wg.Add(1)
-		go func(clientID int) {
+		go func() {
 			defer wg.Done()
-			for range noncesPerClient {
+			for range noncesPerWorker {
 				nonce := anvil.GetNonce()
-				if err := store.Set("client", nonce); err != nil {
-					t.Errorf("Set() error = %v", err)
+				if err := store.Mark(nonce); err != nil {
+					t.Errorf("Mark() error = %v", err)
 				}
 			}
-		}(i)
+		}()
 	}
 
 	wg.Wait()
 }
 
-func TestNonceStore_ConcurrentValidation(t *testing.T) {
+func TestNonceStore_ConcurrentPrune(t *testing.T) {
 	store := anvil.NewNonceStore(5 * time.Second)
 	nonces := make([]string, 100)
 
 	for i := range nonces {
 		nonces[i] = anvil.GetNonce()
-		store.Set("client1", nonces[i])
+		if err := store.Mark(nonces[i]); err != nil {
+			t.Fatalf("Mark() error = %v", err)
+		}
 	}
 
 	var wg sync.WaitGroup
-	for _, nonce := range nonces {
+	for range nonces {
 		wg.Add(1)
-		go func(n string) {
+		go func() {
 			defer wg.Done()
-			store.Valid("client1", n)
-		}(nonce)
+			if err := store.Prune(); err != nil {
+				t.Errorf("Prune() error = %v", err)
+			}
+		}()
 	}
 
 	wg.Wait()

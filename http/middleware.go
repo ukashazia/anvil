@@ -2,7 +2,6 @@ package http
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -12,75 +11,94 @@ import (
 	"github.com/ukashazia/anvil"
 )
 
-type Middleware struct {
-	cfg Config
+type middleware struct {
+	cfg config
+	ttl time.Duration
 }
 
-func NewMiddleware(opts ...Option) (*Middleware, error) {
-	cfg := &Config{}
+type middlewareConfig func(*middleware)
+
+func NewMiddleware(opts ...middlewareConfig) (*middleware, error) {
+	m := &middleware{
+		ttl: 30 * time.Second,
+	}
 
 	for _, opt := range opts {
-		opt(cfg)
+		opt(m)
 	}
 
-	if cfg.verifier == nil {
+	if m.cfg.verifier == nil {
 		return nil, errors.New("verifier is required")
 	}
-	if cfg.nonceStore == nil {
+	if m.cfg.nonceStore == nil {
 		return nil, errors.New("nonce store is required")
 	}
-	if cfg.signer == nil {
+	if m.cfg.signer == nil {
+
 		return nil, errors.New("signer is required")
 	}
 
-	return &Middleware{
-		cfg: *cfg,
-	}, nil
+	return m, nil
 }
 
-func WithHmacVerifier(secret string) Option {
-	return func(c *Config) {
-		c.verifier = anvil.NewHmacVerifier(anvil.LoadHmacSecret([]byte(secret)))
+func WithTtl(ttl time.Duration) middlewareConfig {
+	return func(m *middleware) {
+		m.ttl = ttl
 	}
 }
 
-func WithNonceStore(ns anvil.NonceStorer) Option {
-	return func(c *Config) {
-		c.nonceStore = ns
+func WithHmacVerifier(secret string) middlewareConfig {
+	return func(m *middleware) {
+		m.cfg.verifier = anvil.NewHmacVerifier(anvil.LoadHmacSecret([]byte(secret)))
 	}
 }
 
-func (m *Middleware) Verify(next http.HandlerFunc) http.HandlerFunc {
+func WithNonceStore(ns anvil.NonceStorer) middlewareConfig {
+	return func(m *middleware) {
+		m.cfg.nonceStore = ns
+	}
+}
 
-	return func(w http.ResponseWriter, r *http.Request) {
+func (m *middleware) Verify(handler http.Handler, next http.HandlerFunc) http.Handler {
+	return chain(handler, m.validateNonce, m.validateTimeout, m.validateSignature)
+}
+
+func (m *middleware) validateNonce(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonce := r.Header.Get(headerNonce)
+		err := m.cfg.nonceStore.Mark(nonce)
+		if err != nil && errors.Is(err, anvil.NonceExists) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (m *middleware) validateTimeout(next http.Handler) http.Handler {
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqTime, err := strconv.Atoi(r.Header.Get(headerReqTime))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		clientId := r.Header.Get(headerClientId)
-		nonce := r.Header.Get(headerNonce)
 
-		if time.Now().UnixMilli()-int64(reqTime) > 30*1000 {
+		if time.Now().UnixMilli()-int64(reqTime) > m.ttl.Milliseconds() {
 			w.WriteHeader(http.StatusRequestTimeout)
 			return
 		}
 
-		valid, err := m.cfg.nonceStore.Valid(clientId, nonce)
-		if err != nil && errors.Is(err, anvil.NoNonceError) {
-			err := m.cfg.nonceStore.Set(clientId, nonce)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-		} else if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		} else if err == nil && !valid {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+		next.ServeHTTP(w, r)
+	})
+}
 
+func (m *middleware) validateSignature(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -100,13 +118,16 @@ func (m *Middleware) Verify(next http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		sig, err := hex.DecodeString(signature)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+
+		e := signatureElements{
+			nonce:    r.Header.Get(headerNonce),
+			t:        r.Header.Get(headerReqTime),
+			clientId: r.Header.Get(headerClientId),
+			body:     body,
+			verifier: m.cfg.verifier,
 		}
 
-		valid, err = verify(m.cfg.verifier, sig, []byte(r.Header.Get(headerNonce)), []byte(r.Header.Get(headerReqTime)), []byte(r.Header.Get(headerClientId)), body)
+		valid, err := e.verify(signature)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -117,19 +138,13 @@ func (m *Middleware) Verify(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next(w, r)
-	}
+		next.ServeHTTP(w, r)
+	})
 }
 
-func verify(signer anvil.Verifier, sig []byte, nonce []byte, t []byte, clientId []byte, body []byte) (bool, error) {
-	canonical := append(nonce, t...)
-	canonical = append(canonical, clientId...)
-	canonical = append(canonical, body...)
-
-	v, err := signer.Verify(canonical, sig)
-	if err != nil {
-		return false, err
+func chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		h = middlewares[i](h)
 	}
-
-	return v, nil
+	return h
 }

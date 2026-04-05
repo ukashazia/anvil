@@ -16,41 +16,40 @@ const headerReqTime = "X-Request-Time"
 const headerReqSig = "X-Request-Signature"
 const headerClientId = "X-ClientId"
 
-type Client struct {
-	cfg Config
+type client struct {
+	cfg config
 	id  string
 }
 
-type Config struct {
+type config struct {
 	signer     anvil.Signer
 	verifier   anvil.Verifier
 	nonceStore anvil.NonceStorer
 }
 
-type Option func(*Config)
+type clientConfig func(*client)
 
-func WithHmacSigner(secret string) Option {
-	return func(c *Config) {
+func WithHmacSigner(secret string) clientConfig {
+	return func(c *client) {
 
 		s := anvil.LoadHmacSecret([]byte(secret))
-		c.signer = anvil.NewHmacSigner(s)
+		c.cfg.signer = anvil.NewHmacSigner(s)
 	}
 }
 
-func NewClient(id string, opts ...Option) *Client {
-	cfg := &Config{}
+func NewClient(id string, opts ...clientConfig) *client {
+	c := &client{
+		id: id,
+	}
 
 	for _, opt := range opts {
-		opt(cfg)
+		opt(c)
 	}
 
-	return &Client{
-		cfg: *cfg,
-		id:  id,
-	}
+	return c
 }
 
-func (c *Client) Sign(req *http.Request) *http.Request {
+func (c *client) Sign(req *http.Request) *http.Request {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil
@@ -66,7 +65,15 @@ func (c *Client) Sign(req *http.Request) *http.Request {
 	nonce := anvil.GetNonce()
 	time := strconv.Itoa(int(time.Now().UnixMilli()))
 
-	sig, err := sign(c.cfg.signer, []byte(nonce), []byte(time), []byte(c.id), body)
+	e := signatureElements{
+		nonce:    nonce,
+		t:        time,
+		clientId: c.id,
+		body:     body,
+		signer:   c.cfg.signer,
+	}
+
+	sig, err := e.sign()
 	if err != nil {
 		return nil
 	}
@@ -77,17 +84,4 @@ func (c *Client) Sign(req *http.Request) *http.Request {
 	req.Header.Set(headerReqSig, hex.EncodeToString(sig))
 
 	return req
-}
-
-func sign(signer anvil.Signer, nonce []byte, t []byte, clientId []byte, body []byte) ([]byte, error) {
-	canonical := append(nonce, t...)
-	canonical = append(canonical, clientId...)
-	canonical = append(canonical, body...)
-
-	s, err := signer.Sign(canonical)
-	if err != nil {
-		return nil, err
-	}
-
-	return s, nil
 }

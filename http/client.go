@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/ukashazia/anvil"
+	"github.com/ukashazia/anvil/internal"
 )
 
 const headerNonce = "X-Nonce"
 const headerReqTime = "X-Request-Time"
 const headerReqSig = "X-Request-Signature"
-const headerClientId = "X-ClientId"
+const headerClientID = "X-ClientID"
+const headerSigAlgo = "X-Signature-Algorithm"
 
 type client struct {
 	cfg config
@@ -25,28 +27,46 @@ type config struct {
 	signer     anvil.Signer
 	verifier   anvil.Verifier
 	nonceStore anvil.NonceStorer
+	keyStore   anvil.KeyStorer
 }
 
-type clientConfig func(*client)
+type clientConfig func(*client) error
 
-func WithHmacSigner(secret string) clientConfig {
-	return func(c *client) {
+func WithEcdsaSigner(key internal.PrivateKey) clientConfig {
+	return func(c *client) error {
 
-		s := anvil.LoadHmacSecret([]byte(secret))
-		c.cfg.signer = anvil.NewHmacSigner(s)
+		signer, err := anvil.NewEcdsaSigner(key)
+		if err != nil {
+			return err
+		}
+
+		c.cfg.signer = signer
+		return nil
 	}
 }
 
-func NewClient(id string, opts ...clientConfig) *client {
+func WithHmacSigner(secret internal.HmacSecret) clientConfig {
+	return func(c *client) error {
+
+		c.cfg.signer = anvil.NewHmacSigner(secret)
+
+		return nil
+	}
+}
+
+func NewClient(id string, opts ...clientConfig) (*client, error) {
 	c := &client{
 		id: id,
 	}
 
 	for _, opt := range opts {
-		opt(c)
+		err := opt(c)
+		if err != nil {
+			return nil, nil
+		}
 	}
 
-	return c
+	return c, nil
 }
 
 func (c *client) Sign(req *http.Request) *http.Request {
@@ -68,7 +88,7 @@ func (c *client) Sign(req *http.Request) *http.Request {
 	e := signatureElements{
 		nonce:    nonce,
 		t:        time,
-		clientId: c.id,
+		clientID: c.id,
 		body:     body,
 		signer:   c.cfg.signer,
 	}
@@ -80,7 +100,8 @@ func (c *client) Sign(req *http.Request) *http.Request {
 
 	req.Header.Set(headerNonce, nonce)
 	req.Header.Set(headerReqTime, time)
-	req.Header.Set(headerClientId, c.id)
+	req.Header.Set(headerClientID, c.id)
+	req.Header.Set(headerSigAlgo, c.cfg.signer.Algorithm().String())
 	req.Header.Set(headerReqSig, hex.EncodeToString(sig))
 
 	return req

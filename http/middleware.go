@@ -27,15 +27,18 @@ func NewMiddleware(opts ...middlewareConfig) (*middleware, error) {
 		opt(m)
 	}
 
-	if m.cfg.verifier == nil {
-		return nil, errors.New("verifier is required")
+	if m.cfg.verifier != nil {
+		return nil, errors.New("verifier is not required")
 	}
 	if m.cfg.nonceStore == nil {
 		return nil, errors.New("nonce store is required")
 	}
-	if m.cfg.signer == nil {
+	if m.cfg.signer != nil {
 
-		return nil, errors.New("signer is required")
+		return nil, errors.New("signer is not required")
+	}
+	if m.cfg.keyStore == nil {
+		return nil, errors.New("key store is required")
 	}
 
 	return m, nil
@@ -47,15 +50,15 @@ func WithTtl(ttl time.Duration) middlewareConfig {
 	}
 }
 
-func WithHmacVerifier(secret string) middlewareConfig {
-	return func(m *middleware) {
-		m.cfg.verifier = anvil.NewHmacVerifier(anvil.LoadHmacSecret([]byte(secret)))
-	}
-}
-
 func WithNonceStore(ns anvil.NonceStorer) middlewareConfig {
 	return func(m *middleware) {
 		m.cfg.nonceStore = ns
+	}
+}
+
+func WithKeyStore(ks anvil.KeyStorer) middlewareConfig {
+	return func(m *middleware) {
+		m.cfg.keyStore = ks
 	}
 }
 
@@ -119,12 +122,21 @@ func (m *middleware) validateSignature(next http.Handler) http.Handler {
 			return
 		}
 
+		sigAlgo := r.Header.Get(headerSigAlgo)
+		clientID := r.Header.Get(headerClientID)
+		algo, err := anvil.GetAlgorithmFromString(sigAlgo)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		v, err := m.determineVerifier(clientID, algo)
 		e := signatureElements{
 			nonce:    r.Header.Get(headerNonce),
 			t:        r.Header.Get(headerReqTime),
-			clientId: r.Header.Get(headerClientId),
+			clientID: clientID,
 			body:     body,
-			verifier: m.cfg.verifier,
+			verifier: v,
 		}
 
 		valid, err := e.verify(signature)
@@ -147,4 +159,35 @@ func chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.
 		h = middlewares[i](h)
 	}
 	return h
+}
+
+func (m *middleware) determineVerifier(clientID string, algorithm anvil.Algorithm) (anvil.Verifier, error) {
+	switch algorithm {
+	case anvil.Hmac:
+		secret, err := m.cfg.keyStore.GetKey(clientID, algorithm)
+		if err != nil {
+			return nil, err
+		}
+
+		return anvil.NewHmacVerifier(secret), nil
+	case anvil.Ecdsa:
+		key, err := m.cfg.keyStore.GetKey(clientID, algorithm)
+		if err != nil {
+			return nil, err
+		}
+
+		pubKey, err := anvil.LoadEcdsaPublicKey(key)
+		if err != nil {
+			return nil, err
+		}
+
+		v, err := anvil.NewEcdsaVerifier(pubKey)
+		if err != nil {
+			return nil, err
+		}
+
+		return v, nil
+	default:
+		return nil, anvil.AlgorithmNotSupported
+	}
 }

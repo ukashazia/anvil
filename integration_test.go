@@ -165,17 +165,21 @@ func TestKeyStore_WithEcdsaKeys(t *testing.T) {
 		t.Fatalf("PublicKey() error = %v", err)
 	}
 
-	store.SetPublicKey("client1", pubKey1)
-	store.SetPublicKey("client2", pubKey2)
-
-	retrievedKey1, err := store.GetPublicKey("client1")
-	if err != nil {
-		t.Fatalf("GetPublicKey() error = %v", err)
+	if err := store.SetKey("client1", anvil.Ecdsa, pubKey1); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if err := store.SetKey("client2", anvil.Ecdsa, pubKey2); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
 	}
 
-	retrievedKey2, err := store.GetPublicKey("client2")
+	retrievedKey1, err := store.GetKey("client1", anvil.Ecdsa)
 	if err != nil {
-		t.Fatalf("GetPublicKey() error = %v", err)
+		t.Fatalf("GetKey() error = %v", err)
+	}
+
+	retrievedKey2, err := store.GetKey("client2", anvil.Ecdsa)
+	if err != nil {
+		t.Fatalf("GetKey() error = %v", err)
 	}
 
 	if !bytes.Equal(retrievedKey1, pubKey1) {
@@ -225,8 +229,12 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 		t.Fatalf("PublicKey() error = %v", err)
 	}
 
-	keyStore.SetPublicKey("server", serverPubKey)
-	keyStore.SetPublicKey("client", clientPubKey)
+	if err := keyStore.SetKey("server", anvil.Ecdsa, serverPubKey); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if err := keyStore.SetKey("client", anvil.Ecdsa, clientPubKey); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
 
 	nonce := anvil.GetNonce()
 	if err := nonceStore.Mark(nonce); err != nil {
@@ -239,9 +247,9 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 		t.Fatalf("Sign() error = %v", err)
 	}
 
-	retrievedClientPubKey, err := keyStore.GetPublicKey("client")
+	retrievedClientPubKey, err := keyStore.GetKey("client", anvil.Ecdsa)
 	if err != nil {
-		t.Fatalf("GetPublicKey() error = %v", err)
+		t.Fatalf("GetKey() error = %v", err)
 	}
 
 	clientPub, err := anvil.LoadEcdsaPublicKey(retrievedClientPubKey)

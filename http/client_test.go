@@ -53,7 +53,11 @@ func (b *closeErrBody) Close() error {
 }
 
 func TestWithHmacSigner_ConfiguresHmacSigner(t *testing.T) {
-	c := NewClient("client-1", WithHmacSigner("secret"))
+	secret := anvil.LoadHmacSecret([]byte("secret"))
+	c, err := NewClient("client-1", WithHmacSigner(secret))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
 
 	if c.cfg.signer == nil {
 		t.Fatal("WithHmacSigner() should set signer")
@@ -92,8 +96,12 @@ func TestClientSign_SetsHeadersAndPreservesBody(t *testing.T) {
 		t.Fatalf("Sign() request time is not numeric: %v", err)
 	}
 
-	if got := signed.Header.Get(headerClientId); got != "client-1" {
+	if got := signed.Header.Get(headerClientID); got != "client-1" {
 		t.Fatalf("Sign() client id = %q, want %q", got, "client-1")
+	}
+
+	if got := signed.Header.Get(headerSigAlgo); got != "hmac" {
+		t.Fatalf("Sign() signature algorithm = %q, want %q", got, "hmac")
 	}
 
 	if got := signed.Header.Get(headerReqSig); got != "deadbeef" {
@@ -163,7 +171,7 @@ func TestSignatureElementsSign_BuildsCanonicalMessage(t *testing.T) {
 	e := signatureElements{
 		nonce:    "nonce",
 		t:        "time",
-		clientId: "client",
+		clientID: "client",
 		body:     []byte("body"),
 		signer:   signer,
 	}
@@ -186,7 +194,7 @@ func TestSignatureElementsSign_PropagatesSignerError(t *testing.T) {
 	e := signatureElements{
 		nonce:    "n",
 		t:        "t",
-		clientId: "c",
+		clientID: "c",
 		body:     []byte("b"),
 		signer:   &recordingSigner{err: errors.New("sign failed")},
 	}

@@ -3,9 +3,9 @@ package anvil
 import "sync"
 
 type KeyStorer interface {
-	SetPublicKey(clientId string, key []byte) error
-	GetPublicKey(clientId string) ([]byte, error)
-	RemovePublicKey(clientId string) error
+	SetKey(clientID string, algorithm Algorithm, key []byte) error
+	GetKey(clientID string, algorithm Algorithm) ([]byte, error)
+	RemoveKey(clientID string, algorithm Algorithm) error
 }
 
 type keyStore struct {
@@ -18,22 +18,63 @@ func NewKeyStore() (*keyStore, error) {
 	}, nil
 }
 
-func (s *keyStore) SetPublicKey(clientId string, key []byte) error {
-	s.data.Store(clientId, key)
+type storeKey struct {
+	id        string
+	algorithm Algorithm
+}
+
+type storeValue struct {
+	sharedSecret []byte
+	publicKey    []byte
+}
+
+func (s *keyStore) SetKey(clientID string, algorithm Algorithm, key []byte) error {
+	k := storeKey{
+		id:        clientID,
+		algorithm: algorithm,
+	}
+
+	v := storeValue{}
+	switch algorithm {
+	case Hmac:
+		v.sharedSecret = key
+	case Ecdsa:
+		v.publicKey = key
+	default:
+		return AlgorithmNotSupported
+	}
+
+	s.data.Store(k, v)
 	return nil
 }
 
-func (s *keyStore) GetPublicKey(clientId string) ([]byte, error) {
-	k, present := s.data.Load(clientId)
-	if !present {
-		return nil, NoPublicKeyError
+func (s *keyStore) GetKey(clientID string, algorithm Algorithm) ([]byte, error) {
+	k := storeKey{
+		id:        clientID,
+		algorithm: algorithm,
 	}
 
-	return k.([]byte), nil
+	v, present := s.data.Load(k)
+	if !present {
+		return nil, NoKeyError
+	}
+
+	switch algorithm {
+	case Hmac:
+		return v.(storeValue).sharedSecret, nil
+	case Ecdsa:
+		return v.(storeValue).publicKey, nil
+	default:
+		return nil, AlgorithmNotSupported
+	}
 }
 
-func (s *keyStore) RemovePublicKey(clientId string) error {
-	s.data.Delete(clientId)
+func (s *keyStore) RemoveKey(clientID string, algorithm Algorithm) error {
+	k := storeKey{
+		id:        clientID,
+		algorithm: algorithm,
+	}
 
+	s.data.Delete(k)
 	return nil
 }

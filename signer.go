@@ -9,21 +9,9 @@ import (
 	"crypto/x509"
 	"hash"
 	"io"
+
+	"github.com/ukashazia/anvil/internal"
 )
-
-type Algorithm int
-
-const (
-	Hmac Algorithm = iota
-	Ecdsa
-)
-
-func (a Algorithm) String() string {
-	return [...]string{
-		"hmac",
-		"ecdsa",
-	}[a]
-}
 
 type Signer interface {
 	Sign(p []byte) ([]byte, error)
@@ -35,15 +23,14 @@ type Signer interface {
 // hmac signing
 
 type HmacSigner struct {
-	secret hmacSecret
+	secret internal.HmacSecret
 }
-type hmacSecret []byte
 
-func LoadHmacSecret(secret []byte) hmacSecret {
+func LoadHmacSecret(secret []byte) internal.HmacSecret {
 	return secret
 }
 
-func GenerateHmacSecret() (hmacSecret, error) {
+func GenerateHmacSecret() (internal.HmacSecret, error) {
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	if err != nil {
@@ -53,7 +40,7 @@ func GenerateHmacSecret() (hmacSecret, error) {
 	return key, nil
 }
 
-func NewHmacSigner(s hmacSecret) *HmacSigner {
+func NewHmacSigner(s internal.HmacSecret) *HmacSigner {
 	return &HmacSigner{s}
 }
 
@@ -80,9 +67,7 @@ type EcdsaSigner struct {
 	randReader io.Reader
 }
 
-type PrivateKey *ecdsa.PrivateKey
-
-func LoadEcdsaPrivateKey(key []byte) (PrivateKey, error) {
+func LoadEcdsaPrivateKey(key []byte) (internal.PrivateKey, error) {
 	priv, err := x509.ParsePKCS8PrivateKey(key)
 	if err != nil {
 		return nil, err
@@ -91,7 +76,7 @@ func LoadEcdsaPrivateKey(key []byte) (PrivateKey, error) {
 	return priv.(*ecdsa.PrivateKey), nil
 }
 
-func GenerateEcdsaPrivateKey() (PrivateKey, error) {
+func GenerateEcdsaPrivateKey() (internal.PrivateKey, error) {
 	randReader := rand.Reader
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), randReader)
 	if err != nil {
@@ -100,7 +85,7 @@ func GenerateEcdsaPrivateKey() (PrivateKey, error) {
 	return priv, nil
 }
 
-func NewEcdsaSigner(key PrivateKey) (*EcdsaSigner, error) {
+func NewEcdsaSigner(key internal.PrivateKey) (*EcdsaSigner, error) {
 	randReader := rand.Reader
 	return &EcdsaSigner{
 		priv:       key,

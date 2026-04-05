@@ -18,7 +18,7 @@ func (e *signatureElements) sign() ([]byte, error) {
 type signatureElements struct {
 	nonce    string
 	t        string
-	clientId string
+	clientID string
 	body     []byte
 	signer   anvil.Signer
 	verifier anvil.Verifier
@@ -26,7 +26,7 @@ type signatureElements struct {
 
 func (c *signatureElements) buildCanonical() []byte {
 	canonical := append([]byte(c.nonce), c.t...)
-	canonical = append(canonical, c.clientId...)
+	canonical = append(canonical, c.clientID...)
 	canonical = append(canonical, c.body...)
 
 	return canonical

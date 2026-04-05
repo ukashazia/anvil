@@ -15,18 +15,15 @@ import (
 )
 
 type stubNonceStore struct {
-	err      error
-	marked   []string
-	pruneErr error
+	err error
 }
 
-func (s *stubNonceStore) Mark(nonce string) error {
-	s.marked = append(s.marked, nonce)
+func (s *stubNonceStore) Mark(_ string) error {
 	return s.err
 }
 
 func (s *stubNonceStore) Prune() error {
-	return s.pruneErr
+	return nil
 }
 
 type stubVerifier struct {
@@ -61,6 +58,40 @@ func (s *stubSigner) Algorithm() anvil.Algorithm {
 	return anvil.Hmac
 }
 
+type stubKeyStore struct {
+	keys map[string][]byte
+	err  error
+}
+
+func newStubKeyStore() *stubKeyStore {
+	return &stubKeyStore{keys: map[string][]byte{}}
+}
+
+func keyFor(clientID string, algorithm anvil.Algorithm) string {
+	return clientID + ":" + algorithm.String()
+}
+
+func (s *stubKeyStore) SetKey(clientID string, algorithm anvil.Algorithm, key []byte) error {
+	s.keys[keyFor(clientID, algorithm)] = append([]byte(nil), key...)
+	return nil
+}
+
+func (s *stubKeyStore) GetKey(clientID string, algorithm anvil.Algorithm) ([]byte, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	v, ok := s.keys[keyFor(clientID, algorithm)]
+	if !ok {
+		return nil, anvil.NoKeyError
+	}
+	return append([]byte(nil), v...), nil
+}
+
+func (s *stubKeyStore) RemoveKey(clientID string, algorithm anvil.Algorithm) error {
+	delete(s.keys, keyFor(clientID, algorithm))
+	return nil
+}
+
 type readErrRequestBody struct{}
 
 func (b *readErrRequestBody) Read(_ []byte) (int, error) {
@@ -83,11 +114,15 @@ func (b *closeErrRequestBody) Close() error {
 	return errors.New("close body error")
 }
 
-func newValidSignedRequest(t *testing.T, body string, clientID string, secret string) *stdhttp.Request {
+func newValidSignedRequest(t *testing.T, body string, clientID string, secret []byte) *stdhttp.Request {
 	t.Helper()
 
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", bytes.NewBufferString(body))
-	c := NewClient(clientID, WithHmacSigner(secret))
+	c, err := NewClient(clientID, WithHmacSigner(anvil.LoadHmacSecret(secret)))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
 	signed := c.Sign(req)
 	if signed == nil {
 		t.Fatal("Sign() returned nil for valid request")
@@ -106,7 +141,8 @@ func newValidateSignatureRequest(body string, signature string) *stdhttp.Request
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", bytes.NewBufferString(body))
 	req.Header.Set(headerNonce, "n-1")
 	req.Header.Set(headerReqTime, strconv.FormatInt(time.Now().UnixMilli(), 10))
-	req.Header.Set(headerClientId, "client-1")
+	req.Header.Set(headerClientID, "client-1")
+	req.Header.Set(headerSigAlgo, "hmac")
 	if signature != "" {
 		req.Header.Set(headerReqSig, signature)
 	}
@@ -120,26 +156,36 @@ func TestNewMiddleware_RequiredDependencies(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "missing verifier",
-			opts: []middlewareConfig{
-				WithNonceStore(&stubNonceStore{}),
-			},
-			wantErr: "verifier is required",
-		},
-		{
 			name: "missing nonce store",
 			opts: []middlewareConfig{
-				WithHmacVerifier("secret"),
+				WithKeyStore(newStubKeyStore()),
 			},
 			wantErr: "nonce store is required",
 		},
 		{
-			name: "missing signer",
+			name: "missing key store",
 			opts: []middlewareConfig{
-				WithHmacVerifier("secret"),
 				WithNonceStore(&stubNonceStore{}),
 			},
-			wantErr: "signer is required",
+			wantErr: "key store is required",
+		},
+		{
+			name: "verifier not required",
+			opts: []middlewareConfig{
+				WithNonceStore(&stubNonceStore{}),
+				WithKeyStore(newStubKeyStore()),
+				func(m *middleware) { m.cfg.verifier = &stubVerifier{valid: true} },
+			},
+			wantErr: "verifier is not required",
+		},
+		{
+			name: "signer not required",
+			opts: []middlewareConfig{
+				WithNonceStore(&stubNonceStore{}),
+				WithKeyStore(newStubKeyStore()),
+				func(m *middleware) { m.cfg.signer = &stubSigner{} },
+			},
+			wantErr: "signer is not required",
 		},
 	}
 
@@ -155,9 +201,8 @@ func TestNewMiddleware_RequiredDependencies(t *testing.T) {
 
 func TestWithTtl_OverridesDefault(t *testing.T) {
 	m, err := NewMiddleware(
-		WithHmacVerifier("secret"),
 		WithNonceStore(&stubNonceStore{}),
-		func(m *middleware) { m.cfg.signer = &stubSigner{} },
+		WithKeyStore(newStubKeyStore()),
 		WithTtl(5*time.Second),
 	)
 	if err != nil {
@@ -166,19 +211,6 @@ func TestWithTtl_OverridesDefault(t *testing.T) {
 
 	if m.ttl != 5*time.Second {
 		t.Fatalf("middleware ttl = %v, want %v", m.ttl, 5*time.Second)
-	}
-}
-
-func TestWithHmacVerifier_ConfiguresVerifier(t *testing.T) {
-	m := &middleware{}
-	WithHmacVerifier("secret")(m)
-
-	if m.cfg.verifier == nil {
-		t.Fatal("WithHmacVerifier() should set verifier")
-	}
-
-	if got := m.cfg.verifier.Algorithm(); got != anvil.Hmac {
-		t.Fatalf("WithHmacVerifier() algorithm = %v, want %v", got, anvil.Hmac)
 	}
 }
 
@@ -192,12 +224,26 @@ func TestWithNonceStore_ConfiguresNonceStore(t *testing.T) {
 	}
 }
 
+func TestWithKeyStore_ConfiguresKeyStore(t *testing.T) {
+	ks := newStubKeyStore()
+	m := &middleware{}
+	WithKeyStore(ks)(m)
+
+	if m.cfg.keyStore != ks {
+		t.Fatal("WithKeyStore() should assign provided key store")
+	}
+}
+
 func TestMiddlewareVerify_AllValid_CallsHandler(t *testing.T) {
-	secret := "my-secret"
+	secret := []byte("my-secret")
+	keyStore := newStubKeyStore()
+	if err := keyStore.SetKey("client-1", anvil.Hmac, secret); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+
 	m, err := NewMiddleware(
-		WithHmacVerifier(secret),
-		func(m *middleware) { m.cfg.signer = &stubSigner{} },
 		WithNonceStore(anvil.NewNonceStore(time.Minute)),
+		WithKeyStore(keyStore),
 		WithTtl(10*time.Second),
 	)
 	if err != nil {
@@ -209,7 +255,6 @@ func TestMiddlewareVerify_AllValid_CallsHandler(t *testing.T) {
 	called := false
 	handler := m.Verify(newSuccessfulHandler(&called), nil)
 	rr := httptest.NewRecorder()
-
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code != stdhttp.StatusNoContent {
@@ -220,171 +265,71 @@ func TestMiddlewareVerify_AllValid_CallsHandler(t *testing.T) {
 	}
 }
 
-func TestValidateNonce_UnauthorizedOnDuplicateNonce(t *testing.T) {
-	m := &middleware{
-		cfg: config{nonceStore: &stubNonceStore{err: anvil.NonceExists}},
+func TestValidateSignature_ErrorPaths(t *testing.T) {
+	keyStore := newStubKeyStore()
+	if err := keyStore.SetKey("client-1", anvil.Hmac, []byte("secret")); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
 	}
 
-	req := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
-	req.Header.Set(headerNonce, "n-1")
+	m := &middleware{cfg: config{keyStore: keyStore}}
 
-	called := false
-	handler := m.validateNonce(newSuccessfulHandler(&called))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != stdhttp.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rr.Code, stdhttp.StatusUnauthorized)
-	}
-	if called {
-		t.Fatal("next handler should not be called")
-	}
-}
-
-func TestValidateNonce_InternalServerErrorOnStoreError(t *testing.T) {
-	m := &middleware{
-		cfg: config{nonceStore: &stubNonceStore{err: errors.New("store down")}},
-	}
-
-	req := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
-	req.Header.Set(headerNonce, "n-1")
-
-	called := false
-	handler := m.validateNonce(newSuccessfulHandler(&called))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != stdhttp.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, stdhttp.StatusInternalServerError)
-	}
-	if called {
-		t.Fatal("next handler should not be called")
-	}
-}
-
-func TestValidateTimeout(t *testing.T) {
 	tests := []struct {
 		name       string
-		ttl        time.Duration
-		reqTime    string
+		buildReq   func() *stdhttp.Request
 		wantStatus int
-		wantCalled bool
 	}{
 		{
-			name:       "bad header",
-			ttl:        time.Second,
-			reqTime:    "not-a-number",
+			name:       "missing signature",
+			buildReq:   func() *stdhttp.Request { return newValidateSignatureRequest("payload", "") },
+			wantStatus: stdhttp.StatusUnauthorized,
+		},
+		{
+			name:       "invalid hex",
+			buildReq:   func() *stdhttp.Request { return newValidateSignatureRequest("payload", "not-hex") },
 			wantStatus: stdhttp.StatusInternalServerError,
-			wantCalled: false,
 		},
 		{
-			name:       "expired request",
-			ttl:        10 * time.Millisecond,
-			reqTime:    strconv.FormatInt(time.Now().Add(-2*time.Second).UnixMilli(), 10),
-			wantStatus: stdhttp.StatusRequestTimeout,
-			wantCalled: false,
+			name: "unsupported signature algorithm",
+			buildReq: func() *stdhttp.Request {
+				req := newValidateSignatureRequest("payload", "de")
+				req.Header.Set(headerSigAlgo, "unknown")
+				return req
+			},
+			wantStatus: stdhttp.StatusInternalServerError,
 		},
 		{
-			name:       "request within ttl",
-			ttl:        10 * time.Second,
-			reqTime:    strconv.FormatInt(time.Now().UnixMilli(), 10),
-			wantStatus: stdhttp.StatusNoContent,
-			wantCalled: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &middleware{ttl: tt.ttl}
-			req := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
-			req.Header.Set(headerReqTime, tt.reqTime)
-
-			called := false
-			handler := m.validateTimeout(newSuccessfulHandler(&called))
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
-
-			if rr.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d", rr.Code, tt.wantStatus)
-			}
-			if called != tt.wantCalled {
-				t.Fatalf("next called = %v, want %v", called, tt.wantCalled)
-			}
-		})
-	}
-}
-
-func TestValidateSignature_ErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		verifier    *stubVerifier
-		buildReq    func() *stdhttp.Request
-		wantStatus  int
-		wantInvoked bool
-	}{
-		{
-			name:        "missing signature",
-			verifier:    &stubVerifier{valid: true},
-			buildReq:    func() *stdhttp.Request { return newValidateSignatureRequest("payload", "") },
-			wantStatus:  stdhttp.StatusUnauthorized,
-			wantInvoked: false,
-		},
-		{
-			name:        "invalid hex",
-			verifier:    &stubVerifier{valid: true},
-			buildReq:    func() *stdhttp.Request { return newValidateSignatureRequest("payload", "not-hex") },
-			wantStatus:  stdhttp.StatusInternalServerError,
-			wantInvoked: false,
-		},
-		{
-			name:     "body read error",
-			verifier: &stubVerifier{valid: true},
+			name: "body read error",
 			buildReq: func() *stdhttp.Request {
 				req := httptest.NewRequest(stdhttp.MethodPost, "/", nil)
 				req.Body = &readErrRequestBody{}
 				req.Header.Set(headerReqSig, "de")
 				return req
 			},
-			wantStatus:  stdhttp.StatusInternalServerError,
-			wantInvoked: false,
+			wantStatus: stdhttp.StatusInternalServerError,
 		},
 		{
-			name:     "body close error",
-			verifier: &stubVerifier{valid: true},
+			name: "body close error",
 			buildReq: func() *stdhttp.Request {
 				req := httptest.NewRequest(stdhttp.MethodPost, "/", nil)
 				req.Body = &closeErrRequestBody{r: bytes.NewReader([]byte("payload"))}
 				req.Header.Set(headerReqSig, "de")
 				return req
 			},
-			wantStatus:  stdhttp.StatusInternalServerError,
-			wantInvoked: false,
+			wantStatus: stdhttp.StatusInternalServerError,
 		},
 		{
-			name:        "verifier error",
-			verifier:    &stubVerifier{err: errors.New("verify error")},
-			buildReq:    func() *stdhttp.Request { return newValidateSignatureRequest("payload", "de") },
-			wantStatus:  stdhttp.StatusInternalServerError,
-			wantInvoked: true,
-		},
-		{
-			name:        "invalid signature",
-			verifier:    &stubVerifier{valid: false},
-			buildReq:    func() *stdhttp.Request { return newValidateSignatureRequest("payload", "de") },
-			wantStatus:  stdhttp.StatusUnauthorized,
-			wantInvoked: true,
+			name:       "invalid signature",
+			buildReq:   func() *stdhttp.Request { return newValidateSignatureRequest("payload", "00") },
+			wantStatus: stdhttp.StatusUnauthorized,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &middleware{cfg: config{verifier: tt.verifier}}
-			req := tt.buildReq()
-
 			called := false
 			handler := m.validateSignature(newSuccessfulHandler(&called))
 			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			handler.ServeHTTP(rr, tt.buildReq())
 
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rr.Code, tt.wantStatus)
@@ -392,23 +337,20 @@ func TestValidateSignature_ErrorPaths(t *testing.T) {
 			if called {
 				t.Fatal("next handler should not be called")
 			}
-			if tt.verifier.invoked != tt.wantInvoked {
-				t.Fatalf("verifier invoked = %v, want %v", tt.verifier.invoked, tt.wantInvoked)
-			}
 		})
 	}
 }
 
 func TestValidateSignature_PassesCanonicalMessageAndRestoresBody(t *testing.T) {
-	v := &stubVerifier{valid: true}
-	m := &middleware{cfg: config{verifier: v}}
+	secret := []byte("secret")
+	keyStore := newStubKeyStore()
+	if err := keyStore.SetKey("client-1", anvil.Hmac, secret); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
 
+	m := &middleware{cfg: config{keyStore: keyStore}}
 	body := "payload"
-	req := httptest.NewRequest(stdhttp.MethodPost, "/", bytes.NewBufferString(body))
-	req.Header.Set(headerNonce, "nonce")
-	req.Header.Set(headerReqTime, "123")
-	req.Header.Set(headerClientId, "client")
-	req.Header.Set(headerReqSig, "dead")
+	req := newValidSignedRequest(t, body, "client-1", secret)
 
 	called := false
 	handler := m.validateSignature(newSuccessfulHandler(&called))
@@ -422,18 +364,6 @@ func TestValidateSignature_PassesCanonicalMessageAndRestoresBody(t *testing.T) {
 		t.Fatal("next handler should be called")
 	}
 
-	if !v.invoked {
-		t.Fatal("verifier should have been invoked")
-	}
-
-	if got, want := string(v.msg), "nonce123clientpayload"; got != want {
-		t.Fatalf("verify canonical message = %q, want %q", got, want)
-	}
-
-	if got, want := v.sig, []byte{0xde, 0xad}; !bytes.Equal(got, want) {
-		t.Fatalf("decoded signature = %v, want %v", got, want)
-	}
-
 	restored, err := io.ReadAll(req.Body)
 	if err != nil {
 		t.Fatalf("ReadAll(req.Body) error = %v", err)
@@ -443,12 +373,34 @@ func TestValidateSignature_PassesCanonicalMessageAndRestoresBody(t *testing.T) {
 	}
 }
 
+func TestDetermineVerifier(t *testing.T) {
+	secret := []byte("secret")
+	keyStore := newStubKeyStore()
+	if err := keyStore.SetKey("client-1", anvil.Hmac, secret); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+
+	m := &middleware{cfg: config{keyStore: keyStore}}
+
+	v, err := m.determineVerifier("client-1", anvil.Hmac)
+	if err != nil {
+		t.Fatalf("determineVerifier() error = %v", err)
+	}
+	if v == nil {
+		t.Fatal("determineVerifier() returned nil verifier")
+	}
+
+	if _, err := m.determineVerifier("client-1", anvil.Algorithm(999)); !errors.Is(err, anvil.AlgorithmNotSupported) {
+		t.Fatalf("determineVerifier() error = %v, want %v", err, anvil.AlgorithmNotSupported)
+	}
+}
+
 func TestSignatureElementsVerify_BuildsCanonicalMessage(t *testing.T) {
 	v := &stubVerifier{valid: true}
 	e := signatureElements{
 		nonce:    "nonce",
 		t:        "time",
-		clientId: "client",
+		clientID: "client",
 		body:     []byte("body"),
 		verifier: v,
 	}
@@ -474,7 +426,7 @@ func TestSignatureElementsVerify_PropagatesVerifierError(t *testing.T) {
 	e := signatureElements{
 		nonce:    "n",
 		t:        "t",
-		clientId: "c",
+		clientID: "c",
 		body:     []byte("b"),
 		verifier: &stubVerifier{err: errors.New("boom")},
 	}

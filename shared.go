@@ -25,7 +25,7 @@ func GetAlgorithmFromString(s string) (Algorithm, error) {
 	case "ecdsa":
 		return Ecdsa, nil
 	default:
-		return -1, AlgorithmNotSupported
+		return -1, ErrAlgorithmNotSupported
 	}
 }
 

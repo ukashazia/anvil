@@ -1,6 +1,7 @@
 package anvil_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,7 +10,11 @@ import (
 )
 
 func TestGetNonce(t *testing.T) {
-	nonce := anvil.GetNonce()
+	nonce, err := anvil.GetNonce()
+	if err != nil {
+		t.Fatalf("GetNonce() error = %v", err)
+	}
+
 	if nonce == "" {
 		t.Fatal("GetNonce() returned empty string")
 	}
@@ -30,7 +35,11 @@ func TestGetNonceUniqueness(t *testing.T) {
 	iterations := 1000
 
 	for range iterations {
-		nonce := anvil.GetNonce()
+		nonce, err := anvil.GetNonce()
+		if err != nil {
+			t.Fatalf("GetNonce() error = %v", err)
+		}
+
 		if seen[nonce] {
 			t.Fatalf("GetNonce() generated duplicate: %s", nonce)
 		}
@@ -69,8 +78,8 @@ func TestNonceStore_Mark_SameNonceMultipleTimes(t *testing.T) {
 	}
 
 	err = store.Mark("nonce1")
-	if err != nil {
-		t.Fatalf("Mark() error = %v", err)
+	if !errors.Is(err, anvil.ErrNonceExists) {
+		t.Fatalf("Mark() error = %v, want %v", err, anvil.ErrNonceExists)
 	}
 }
 
@@ -109,8 +118,8 @@ func TestNonceStore_Prune_LeavesFreshNonces(t *testing.T) {
 	}
 
 	err = store.Mark("nonce1")
-	if err != nil {
-		t.Fatalf("Mark() error = %v", err)
+	if !errors.Is(err, anvil.ErrNonceExists) {
+		t.Fatalf("Mark() error = %v, want %v", err, anvil.ErrNonceExists)
 	}
 }
 
@@ -125,7 +134,12 @@ func TestNonceStore_ConcurrentMark(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range noncesPerWorker {
-				nonce := anvil.GetNonce()
+				nonce, err := anvil.GetNonce()
+				if err != nil {
+					t.Errorf("GetNonce() error = %v", err)
+					return
+				}
+
 				if err := store.Mark(nonce); err != nil {
 					t.Errorf("Mark() error = %v", err)
 				}
@@ -141,7 +155,12 @@ func TestNonceStore_ConcurrentPrune(t *testing.T) {
 	nonces := make([]string, 100)
 
 	for i := range nonces {
-		nonces[i] = anvil.GetNonce()
+		nonce, err := anvil.GetNonce()
+		if err != nil {
+			t.Fatalf("GetNonce() error = %v", err)
+		}
+
+		nonces[i] = nonce
 		if err := store.Mark(nonces[i]); err != nil {
 			t.Fatalf("Mark() error = %v", err)
 		}

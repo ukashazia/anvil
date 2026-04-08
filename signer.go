@@ -73,7 +73,14 @@ func LoadEcdsaPrivateKey(key []byte) (internal.PrivateKey, error) {
 		return nil, err
 	}
 
-	return priv.(*ecdsa.PrivateKey), nil
+	switch priv := priv.(type) {
+	case *ecdsa.PrivateKey:
+		return priv, nil
+
+	default:
+		return nil, ErrUnsupportedPrivateKeyType
+	}
+
 }
 
 func GenerateEcdsaPrivateKey() (internal.PrivateKey, error) {

@@ -3,6 +3,7 @@ package anvil_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -236,7 +237,10 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 		t.Fatalf("SetKey() error = %v", err)
 	}
 
-	nonce := anvil.GetNonce()
+	nonce, err := anvil.GetNonce()
+	if err != nil {
+		t.Fatalf("GetNonce() error = %v", err)
+	}
 	if err := nonceStore.Mark(nonce); err != nil {
 		t.Fatalf("Mark() error = %v", err)
 	}
@@ -273,8 +277,8 @@ func TestFullWorkflow_EcdsaWithKeyStoreAndNonce(t *testing.T) {
 	}
 
 	err = nonceStore.Mark(nonce)
-	if err != nil {
-		t.Fatalf("Mark() error = %v", err)
+	if !errors.Is(err, anvil.ErrNonceExists) {
+		t.Fatalf("Mark() error = %v, want %v", err, anvil.ErrNonceExists)
 	}
 
 	time.Sleep(6 * time.Second)

@@ -35,13 +35,17 @@ func (s *keyStore) SetKey(clientID string, algorithm Algorithm, key []byte) erro
 	}
 
 	v := storeValue{}
+
+	keyCopy := make([]byte, len(key))
+	copy(keyCopy, key)
+
 	switch algorithm {
 	case Hmac:
-		v.sharedSecret = key
+		v.sharedSecret = keyCopy
 	case Ecdsa:
-		v.publicKey = key
+		v.publicKey = keyCopy
 	default:
-		return AlgorithmNotSupported
+		return ErrAlgorithmNotSupported
 	}
 
 	s.data.Store(k, v)
@@ -56,7 +60,7 @@ func (s *keyStore) GetKey(clientID string, algorithm Algorithm) ([]byte, error) 
 
 	v, present := s.data.Load(k)
 	if !present {
-		return nil, NoKeyError
+		return nil, ErrNoKey
 	}
 
 	switch algorithm {
@@ -65,7 +69,7 @@ func (s *keyStore) GetKey(clientID string, algorithm Algorithm) ([]byte, error) 
 	case Ecdsa:
 		return v.(storeValue).publicKey, nil
 	default:
-		return nil, AlgorithmNotSupported
+		return nil, ErrAlgorithmNotSupported
 	}
 }
 

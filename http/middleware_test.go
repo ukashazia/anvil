@@ -82,7 +82,7 @@ func (s *stubKeyStore) GetKey(clientID string, algorithm anvil.Algorithm) ([]byt
 	}
 	v, ok := s.keys[keyFor(clientID, algorithm)]
 	if !ok {
-		return nil, anvil.NoKeyError
+		return nil, anvil.ErrNoKey
 	}
 	return append([]byte(nil), v...), nil
 }
@@ -123,9 +123,9 @@ func newValidSignedRequest(t *testing.T, body string, clientID string, secret []
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	signed := c.Sign(req)
-	if signed == nil {
-		t.Fatal("Sign() returned nil for valid request")
+	signed, err := c.Sign(req)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
 	}
 	return signed
 }
@@ -253,7 +253,7 @@ func TestMiddlewareVerify_AllValid_CallsHandler(t *testing.T) {
 	req := newValidSignedRequest(t, "payload", "client-1", secret)
 
 	called := false
-	handler := m.Verify(newSuccessfulHandler(&called), nil)
+	handler := m.Verify(newSuccessfulHandler(&called))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -390,8 +390,8 @@ func TestDetermineVerifier(t *testing.T) {
 		t.Fatal("determineVerifier() returned nil verifier")
 	}
 
-	if _, err := m.determineVerifier("client-1", anvil.Algorithm(999)); !errors.Is(err, anvil.AlgorithmNotSupported) {
-		t.Fatalf("determineVerifier() error = %v, want %v", err, anvil.AlgorithmNotSupported)
+	if _, err := m.determineVerifier("client-1", anvil.Algorithm(999)); !errors.Is(err, anvil.ErrAlgorithmNotSupported) {
+		t.Fatalf("determineVerifier() error = %v, want %v", err, anvil.ErrAlgorithmNotSupported)
 	}
 }
 

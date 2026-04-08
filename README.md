@@ -134,18 +134,16 @@ import (
 
 func main() {
 	ns := anvil.NewNonceStore(30 * time.Second)
-	n := anvil.GetNonce()
-
-	if err := ns.Set("client-1", n); err != nil {
-		panic(err)
-	}
-
-	ok, err := ns.Valid("client-1", n)
+	n, err := anvil.GetNonce()
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(ok)
+	if err := ns.Mark(n); err != nil {
+		panic(err)
+	}
+
+	fmt.Println("nonce accepted")
 }
 ```
 
@@ -166,11 +164,11 @@ func main() {
 		panic(err)
 	}
 
-	if err := ks.SetPublicKey("client-1", []byte("public-key-bytes")); err != nil {
+	if err := ks.SetKey("client-1", anvil.Ecdsa, []byte("public-key-bytes")); err != nil {
 		panic(err)
 	}
 
-	k, err := ks.GetPublicKey("client-1")
+	k, err := ks.GetKey("client-1", anvil.Ecdsa)
 	if err != nil {
 		panic(err)
 	}
@@ -194,28 +192,45 @@ import (
 )
 
 func main() {
-	secret := "shared-secret"
+	secret := anvil.LoadHmacSecret([]byte("shared-secret"))
 	nonceStore := anvil.NewNonceStore(30 * time.Second)
+	keyStore, err := anvil.NewKeyStore()
+	if err != nil {
+		panic(err)
+	}
 
-	client := anvilhttp.NewClient(
+	if err := keyStore.SetKey("client-1", anvil.Hmac, secret); err != nil {
+		panic(err)
+	}
+
+	client, err := anvilhttp.NewClient(
 		"client-1",
 		anvilhttp.WithHmacSigner(secret),
 	)
+	if err != nil {
+		panic(err)
+	}
 
-	mw := anvilhttp.NewMiddleware(
-		anvilhttp.WithHmacSigner(secret),
-		anvilhttp.WithHmacVerifier(secret),
+	mw, err := anvilhttp.NewMiddleware(
 		anvilhttp.WithNonceStore(nonceStore),
+		anvilhttp.WithKeyStore(keyStore),
 	)
 	if err != nil {
 		panic(err)
 	}
 
 	payload := []byte(`{"ping":"pong"}`)
-	req, _ := http.NewRequest(http.MethodPost, "http://localhost:8080", bytes.NewReader(payload))
-	req = client.Sign(req, "client-1")
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:8080", bytes.NewReader(payload))
+	if err != nil {
+		panic(err)
+	}
 
-	_ = mw
+	req, err = client.Sign(req)
+	if err != nil {
+		panic(err)
+	}
+
+	_ = mw.Verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	_ = req
 }
 ```
@@ -248,4 +263,3 @@ func main() {
 ## Contributing
 
 If you want to contribute, open an issue with the target area (`core`, `http`, `tests`, `docs`) and a short design note before implementation.
-

@@ -69,8 +69,8 @@ func TestKeyStore_GetKey_NotExists(t *testing.T) {
 	}
 
 	_, err = store.GetKey("nonexistent", anvil.Hmac)
-	if !errors.Is(err, anvil.NoKeyError) {
-		t.Fatalf("GetKey() error = %v, want %v", err, anvil.NoKeyError)
+	if !errors.Is(err, anvil.ErrNoKey) {
+		t.Fatalf("GetKey() error = %v, want %v", err, anvil.ErrNoKey)
 	}
 }
 
@@ -85,8 +85,8 @@ func TestKeyStore_UnsupportedAlgorithm(t *testing.T) {
 	}
 
 	_, err = store.GetKey("client1", anvil.Algorithm(999))
-	if !errors.Is(err, anvil.NoKeyError) {
-		t.Fatalf("GetKey() error = %v, want %v", err, anvil.NoKeyError)
+	if !errors.Is(err, anvil.ErrNoKey) {
+		t.Fatalf("GetKey() error = %v, want %v", err, anvil.ErrNoKey)
 	}
 }
 
@@ -105,8 +105,8 @@ func TestKeyStore_RemoveKey(t *testing.T) {
 	}
 
 	_, err = store.GetKey("client1", anvil.Hmac)
-	if !errors.Is(err, anvil.NoKeyError) {
-		t.Fatalf("GetKey() error = %v, want %v", err, anvil.NoKeyError)
+	if !errors.Is(err, anvil.ErrNoKey) {
+		t.Fatalf("GetKey() error = %v, want %v", err, anvil.ErrNoKey)
 	}
 }
 

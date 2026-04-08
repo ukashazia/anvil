@@ -17,11 +17,12 @@ type NonceStore struct {
 	data sync.Map
 }
 
-type nonceValue struct{}
+type nonceValue struct {
+	setAt time.Time
+}
 
 type nonceKey struct {
-	key   string
-	setAt time.Time
+	key string
 }
 
 func NewNonceStore(ttl time.Duration) *NonceStore {
@@ -33,24 +34,26 @@ func NewNonceStore(ttl time.Duration) *NonceStore {
 
 func (s *NonceStore) Mark(n string) error {
 	key := nonceKey{
-		key:   n,
-		setAt: time.Now(),
+		key: n,
 	}
 
 	_, exists := s.data.Load(key)
 	if !exists {
-		s.data.Store(key, nonceValue{})
+		s.data.Store(key, nonceValue{
+			setAt: time.Now(),
+		})
 		return nil
 	}
 
-	return NonceExists
+	return ErrNonceExists
 }
 
 func (s *NonceStore) Prune() error {
 	s.data.Range(func(key, value any) bool {
-		nonce := key.(nonceKey)
-		if time.Since(nonce.setAt) > s.ttl {
-			s.data.Delete(nonce)
+		nonceKey := key.(nonceKey)
+		nonceValue := value.(nonceValue)
+		if time.Since(nonceValue.setAt) > s.ttl {
+			s.data.Delete(nonceKey)
 		}
 
 		return true
@@ -59,12 +62,12 @@ func (s *NonceStore) Prune() error {
 	return nil
 }
 
-func GetNonce() string {
+func GetNonce() (string, error) {
 	r := make([]byte, 16)
 	_, err := rand.Reader.Read(r)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
-	return hex.EncodeToString(r)
+	return hex.EncodeToString(r), nil
 }

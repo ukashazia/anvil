@@ -78,9 +78,9 @@ func TestClientSign_SetsHeadersAndPreservesBody(t *testing.T) {
 
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", bytes.NewBufferString(body))
 
-	signed := c.Sign(req)
-	if signed == nil {
-		t.Fatal("Sign() returned nil")
+	signed, err := c.Sign(req)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
 	}
 
 	nonce := signed.Header.Get(headerNonce)
@@ -134,8 +134,8 @@ func TestClientSign_ReturnsNilOnBodyReadError(t *testing.T) {
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", nil)
 	req.Body = &readErrBody{}
 
-	if got := c.Sign(req); got != nil {
-		t.Fatal("Sign() should return nil when request body read fails")
+	if _, err := c.Sign(req); err == nil {
+		t.Fatal("Sign() should return error when request body read fails")
 	}
 }
 
@@ -148,8 +148,8 @@ func TestClientSign_ReturnsNilOnBodyCloseError(t *testing.T) {
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", nil)
 	req.Body = &closeErrBody{r: bytes.NewReader([]byte("payload"))}
 
-	if got := c.Sign(req); got != nil {
-		t.Fatal("Sign() should return nil when request body close fails")
+	if _, err := c.Sign(req); err == nil {
+		t.Fatal("Sign() should return error when request body close fails")
 	}
 }
 
@@ -161,8 +161,8 @@ func TestClientSign_ReturnsNilOnSignerError(t *testing.T) {
 
 	req := httptest.NewRequest(stdhttp.MethodPost, "/", bytes.NewBufferString("payload"))
 
-	if got := c.Sign(req); got != nil {
-		t.Fatal("Sign() should return nil when signer returns an error")
+	if _, err := c.Sign(req); err == nil {
+		t.Fatal("Sign() should return error when signer returns an error")
 	}
 }
 

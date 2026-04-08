@@ -2,9 +2,12 @@ package anvil
 
 import "errors"
 
-var NoPublicKeyError = errors.New("no public key found for the given key")
-var NoNonceError = errors.New("no nonce exists for the client")
-var NonceExists = errors.New("nonce already exists")
-var NoSharedSecretError = errors.New("no shared secret found for the given key")
-var NoKeyError = errors.New("no key found for the given key")
-var AlgorithmNotSupported = errors.New("algorithm not supported")
+var ErrNoPublicKey = errors.New("no public key found for the given key")
+var ErrNoNonce = errors.New("no nonce exists for the client")
+var ErrNonceExists = errors.New("nonce already exists")
+var ErrNoSharedSecret = errors.New("no shared secret found for the given key")
+var ErrNoKey = errors.New("no key found for the given key")
+var ErrAlgorithmNotSupported = errors.New("algorithm not supported")
+
+var ErrUnsupportedPrivateKeyType = errors.New("unsupported private key type")
+var ErrUnsupportedPublicKeyType = errors.New("unsupported public key type")

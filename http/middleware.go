@@ -62,15 +62,15 @@ func WithKeyStore(ks anvil.KeyStorer) middlewareConfig {
 	}
 }
 
-func (m *middleware) Verify(handler http.Handler, next http.HandlerFunc) http.Handler {
-	return chain(handler, m.validateNonce, m.validateTimeout, m.validateSignature)
+func (m *middleware) Verify(handler http.Handler) http.Handler {
+	return chain(handler, m.validateTimeout, m.validateNonce, m.validateSignature)
 }
 
 func (m *middleware) validateNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce := r.Header.Get(headerNonce)
 		err := m.cfg.nonceStore.Mark(nonce)
-		if err != nil && errors.Is(err, anvil.NonceExists) {
+		if err != nil && errors.Is(err, anvil.ErrNonceExists) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		} else if err != nil {
@@ -87,7 +87,7 @@ func (m *middleware) validateTimeout(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqTime, err := strconv.Atoi(r.Header.Get(headerReqTime))
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
@@ -126,11 +126,16 @@ func (m *middleware) validateSignature(next http.Handler) http.Handler {
 		clientID := r.Header.Get(headerClientID)
 		algo, err := anvil.GetAlgorithmFromString(sigAlgo)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		v, err := m.determineVerifier(clientID, algo)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		e := signatureElements{
 			nonce:    r.Header.Get(headerNonce),
 			t:        r.Header.Get(headerReqTime),
@@ -188,6 +193,6 @@ func (m *middleware) determineVerifier(clientID string, algorithm anvil.Algorith
 
 		return v, nil
 	default:
-		return nil, anvil.AlgorithmNotSupported
+		return nil, anvil.ErrAlgorithmNotSupported
 	}
 }

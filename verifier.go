@@ -54,12 +54,18 @@ type EcdsaVerifier struct {
 }
 
 func LoadEcdsaPublicKey(key []byte) (internal.PublicKey, error) {
-	parsed, err := x509.ParsePKIXPublicKey(key)
+	pub, err := x509.ParsePKIXPublicKey(key)
 	if err != nil {
 		return nil, err
 	}
-	pub := parsed.(*ecdsa.PublicKey)
-	return pub, nil
+
+	switch pub := pub.(type) {
+	case *ecdsa.PublicKey:
+		return pub, nil
+
+	default:
+		return nil, ErrUnsupportedPublicKeyType
+	}
 }
 
 func NewEcdsaVerifier(pkey internal.PublicKey) (*EcdsaVerifier, error) {

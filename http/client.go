@@ -62,27 +62,31 @@ func NewClient(id string, opts ...clientConfig) (*client, error) {
 	for _, opt := range opts {
 		err := opt(c)
 		if err != nil {
-			return nil, nil
+			return nil, err
 		}
 	}
 
 	return c, nil
 }
 
-func (c *client) Sign(req *http.Request) *http.Request {
+func (c *client) Sign(req *http.Request) (*http.Request, error) {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	err = req.Body.Close()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	req.Body = io.NopCloser(bytes.NewReader(body))
 
-	nonce := anvil.GetNonce()
+	nonce, err := anvil.GetNonce()
+	if err != nil {
+		return nil, err
+	}
+
 	time := strconv.Itoa(int(time.Now().UnixMilli()))
 
 	e := signatureElements{
@@ -95,7 +99,7 @@ func (c *client) Sign(req *http.Request) *http.Request {
 
 	sig, err := e.sign()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	req.Header.Set(headerNonce, nonce)
@@ -104,5 +108,5 @@ func (c *client) Sign(req *http.Request) *http.Request {
 	req.Header.Set(headerSigAlgo, c.cfg.signer.Algorithm().String())
 	req.Header.Set(headerReqSig, hex.EncodeToString(sig))
 
-	return req
+	return req, nil
 }
